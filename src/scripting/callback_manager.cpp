@@ -20,6 +20,8 @@
 
 namespace counterstrikesharp {
 
+const char* CustomCallbackPrefix = "Custom_";
+
 ScriptCallback::ScriptCallback(const char* szName) : m_root_context(fxNativeContext{})
 {
     m_script_context_raw = ScriptContextRaw(m_root_context);
@@ -96,6 +98,13 @@ bool CallbackManager::TryAddFunction(const char* szName, CallbackT fnCallable)
     if (pCallback) {
         pCallback->AddListener(fnCallable);
         return true;
+    } else {
+        const char* ptr = strstr(szName, CustomCallbackPrefix);
+
+        if (szName == ptr) {
+            CreateCallback(szName)->AddListener(fnCallable);
+            return true;
+        }
     }
 
     return false;
@@ -109,6 +118,17 @@ bool CallbackManager::TryRemoveFunction(const char* szName, CallbackT fnCallable
     }
 
     return false;
+}
+
+void CallbackManager::TryEmitListeners(const char* szName, void* data)
+{
+    auto* pCallback = FindCallback(szName);
+
+    if (pCallback) {
+        pCallback->ScriptContext().Reset();
+        pCallback->ScriptContext().Push(data);
+        pCallback->Execute();
+    }
 }
 
 void CallbackManager::PrintCallbackDebug()
