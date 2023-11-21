@@ -41,12 +41,14 @@ public:
     ~EntityManager();
     void OnAllInitialized() override;
     void OnShutdown() override;
+    void OnEntityCheckTransmit(CCheckTransmitInfo **pInfo, int infoCount, CBitVec<16384> &, const Entity2Networkable_t **pNetworkables, const uint16 *pEntityIndicies, int nEntities);
     CEntityListener entityListener;
 private:
     ScriptCallback *on_entity_spawned_callback;
     ScriptCallback *on_entity_created_callback;
     ScriptCallback *on_entity_deleted_callback;
     ScriptCallback *on_entity_parent_changed_callback;
+    ScriptCallback *on_entity_check_transmit;
 };
 
 }  // namespace counterstrikesharp

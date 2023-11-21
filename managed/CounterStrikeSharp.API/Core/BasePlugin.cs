@@ -26,8 +26,9 @@ using CounterStrikeSharp.API.Core.Attributes;
 using CounterStrikeSharp.API.Core.Attributes.Registration;
 using CounterStrikeSharp.API.Modules.Admin;
 using CounterStrikeSharp.API.Modules.Commands;
-using CounterStrikeSharp.API.Modules.Events;
+using CounterStrikeSharp.API.Modules.Config;
 using CounterStrikeSharp.API.Modules.Entities;
+using CounterStrikeSharp.API.Modules.Events;
 using CounterStrikeSharp.API.Modules.Listeners;
 using CounterStrikeSharp.API.Modules.Timers;
 using McMaster.NETCore.Plugins;
@@ -40,15 +41,13 @@ namespace CounterStrikeSharp.API.Core
     {
         private bool _disposed;
 
-        public BasePlugin()
-        {
-        }
+        public BasePlugin() { }
 
         public abstract string ModuleName { get; }
         public abstract string ModuleVersion { get; }
-        
+
         public virtual string ModuleAuthor { get; }
-        
+
         public virtual string ModuleDescription { get; }
 
         public string ModulePath { get; internal set; }
@@ -56,13 +55,9 @@ namespace CounterStrikeSharp.API.Core
         public string ModuleDirectory => Path.GetDirectoryName(ModulePath);
         public ILogger Logger { get; set; }
 
-        public virtual void Load(bool hotReload)
-        {
-        }
+        public virtual void Load(bool hotReload) { }
 
-        public virtual void Unload(bool hotReload)
-        {
-        }
+        public virtual void Unload(bool hotReload) { }
 
         public class CallbackSubscriber : IDisposable
         {
@@ -72,7 +67,11 @@ namespace CounterStrikeSharp.API.Core
             private readonly InputArgument _inputArgument;
             private readonly Action _dispose;
 
-            public CallbackSubscriber(Delegate underlyingMethod, Delegate wrapperMethod, Action dispose)
+            public CallbackSubscriber(
+                Delegate underlyingMethod,
+                Delegate wrapperMethod,
+                Action dispose
+            )
             {
                 _dispose = dispose;
                 _underlyingMethod = underlyingMethod;
@@ -104,7 +103,7 @@ namespace CounterStrikeSharp.API.Core
 
         public readonly Dictionary<Delegate, CallbackSubscriber> CommandHandlers =
             new Dictionary<Delegate, CallbackSubscriber>();
-        
+
         public readonly Dictionary<Delegate, CallbackSubscriber> CommandListeners =
             new Dictionary<Delegate, CallbackSubscriber>();
 
@@ -115,14 +114,22 @@ namespace CounterStrikeSharp.API.Core
             new Dictionary<Delegate, CallbackSubscriber>();
 
         public readonly List<Timer> Timers = new List<Timer>();
-        
-        public delegate HookResult GameEventHandler<T>(T @event, GameEventInfo info) where T : GameEvent;
 
-        private void RegisterEventHandlerInternal<T>(string name, GameEventHandler<T> handler, bool post)
+        public delegate HookResult GameEventHandler<T>(T @event, GameEventInfo info)
+            where T : GameEvent;
+
+        private void RegisterEventHandlerInternal<T>(
+            string name,
+            GameEventHandler<T> handler,
+            bool post
+        )
             where T : GameEvent
         {
-            var subscriber = new CallbackSubscriber(handler, handler,
-                () => DeregisterEventHandler(name, handler, post));
+            var subscriber = new CallbackSubscriber(
+                handler,
+                handler,
+                () => DeregisterEventHandler(name, handler, post)
+            );
 
             NativeAPI.HookEvent(name, subscriber.GetInputArgument(), post);
             Handlers[handler] = subscriber;
@@ -134,7 +141,11 @@ namespace CounterStrikeSharp.API.Core
         /// <typeparam name="T">The type of the game event.</typeparam>
         /// <param name="handler">The event handler to register.</param>
         /// <param name="hookMode">The mode in which the event handler is hooked. Default is `HookMode.Post`.</param>
-        public void RegisterEventHandler<T>(GameEventHandler<T> handler, HookMode hookMode = HookMode.Post) where T : GameEvent
+        public void RegisterEventHandler<T>(
+            GameEventHandler<T> handler,
+            HookMode hookMode = HookMode.Post
+        )
+            where T : GameEvent
         {
             var name = typeof(T).GetCustomAttribute<EventNameAttribute>()?.Name;
             RegisterEventHandlerInternal(name, handler, hookMode == HookMode.Post);
@@ -142,13 +153,13 @@ namespace CounterStrikeSharp.API.Core
 
         public void DeregisterEventHandler(string name, Delegate handler, bool post)
         {
-            if (!Handlers.TryGetValue(handler, out var subscriber)) return;
+            if (!Handlers.TryGetValue(handler, out var subscriber))
+                return;
 
             NativeAPI.UnhookEvent(name, subscriber.GetInputArgument(), post);
             FunctionReference.Remove(subscriber.GetReferenceIdentifier());
             Handlers.Remove(handler);
         }
-
 
         /// <summary>
         /// Registers a new server command.
@@ -158,95 +169,167 @@ namespace CounterStrikeSharp.API.Core
         /// <param name="handler">The callback function to be invoked when the command is executed.</param>
         public void AddCommand(string name, string description, CommandInfo.CommandCallback handler)
         {
-            var wrappedHandler = new Action<int, IntPtr>((i, ptr) =>
-            {
-                var caller = (i != -1) ? new CCSPlayerController(NativeAPI.GetEntityFromIndex(i + 1)) : null;
-                var command = new CommandInfo(ptr, caller);
-
-                var methodInfo = handler?.GetMethodInfo();
-
-                if (!AdminManager.CommandIsOverriden(name))
+            var wrappedHandler = new Action<int, IntPtr>(
+                (i, ptr) =>
                 {
-                    // Do not execute command if we do not have the correct permissions.
-                    var permissions = methodInfo?.GetCustomAttributes<BaseRequiresPermissions>();
-                    if (permissions != null)
+                    var caller =
+                        (i != -1)
+                            ? new CCSPlayerController(NativeAPI.GetEntityFromIndex(i + 1))
+                            : null;
+                    var command = new CommandInfo(ptr, caller);
+
+                    var methodInfo = handler?.GetMethodInfo();
+
+                    if (!AdminManager.CommandIsOverriden(name))
                     {
-                        foreach (var attr in permissions)
+                        // Do not execute command if we do not have the correct permissions.
+                        var permissions =
+                            methodInfo?.GetCustomAttributes<BaseRequiresPermissions>();
+                        if (permissions != null)
                         {
+                            foreach (var attr in permissions)
+                            {
+                                attr.Command = name;
+                                if (!attr.CanExecuteCommand(caller))
+                                {
+                                    command.ReplyToCommand(
+                                        "[CSS] You do not have the correct permissions to execute this command."
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    // If this command has it's permissions overriden, we will do an AND check for all permissions.
+                    else
+                    {
+                        // I don't know if this is the most sane implementation of this, can be edited in code review.
+                        var data = AdminManager.GetCommandOverrideData(name);
+                        if (data != null)
+                        {
+                            var attrType =
+                                (data.CheckType == "all")
+                                    ? typeof(RequiresPermissions)
+                                    : typeof(RequiresPermissionsOr);
+                            var attr = (BaseRequiresPermissions)
+                                Activator.CreateInstance(
+                                    attrType,
+                                    args: AdminManager.GetPermissionOverrides(name)
+                                );
                             attr.Command = name;
                             if (!attr.CanExecuteCommand(caller))
                             {
-                                command.ReplyToCommand("[CSS] You do not have the correct permissions to execute this command.");
+                                command.ReplyToCommand(
+                                    "[CSS] You do not have the correct permissions to execute this command."
+                                );
                                 return;
                             }
                         }
                     }
-                }
-                // If this command has it's permissions overriden, we will do an AND check for all permissions.
-                else
-                {
-                    // I don't know if this is the most sane implementation of this, can be edited in code review.
-                    var data = AdminManager.GetCommandOverrideData(name);
-                    if (data != null)
+
+                    // Do not execute if we shouldn't be calling this command.
+                    var helperAttribute = methodInfo?.GetCustomAttribute<CommandHelperAttribute>();
+                    if (helperAttribute != null)
                     {
-                        var attrType = (data.CheckType == "all") ? typeof(RequiresPermissions) : typeof(RequiresPermissionsOr);
-                        var attr = (BaseRequiresPermissions)Activator.CreateInstance(attrType, args: AdminManager.GetPermissionOverrides(name));
-                        attr.Command = name;
-                        if (!attr.CanExecuteCommand(caller))
+                        switch (helperAttribute.WhoCanExcecute)
                         {
-                            command.ReplyToCommand("[CSS] You do not have the correct permissions to execute this command.");
+                            case CommandUsage.CLIENT_AND_SERVER:
+                                break; // Allow command through.
+                            case CommandUsage.CLIENT_ONLY:
+                                if (caller == null || !caller.IsValid)
+                                {
+                                    command.ReplyToCommand(
+                                        "[CSS] This command can only be executed by clients."
+                                    );
+                                    return;
+                                }
+                                break;
+                            case CommandUsage.SERVER_ONLY:
+                                if (caller != null && caller.IsValid)
+                                {
+                                    command.ReplyToCommand(
+                                        "[CSS] This command can only be executed by the server."
+                                    );
+                                    return;
+                                }
+                                break;
+                            default:
+                                throw new ArgumentException(
+                                    "Unrecognised CommandUsage value passed in CommandHelperAttribute."
+                                );
+                        }
+
+                        // Technically the command itself counts as the first argument,
+                        // but we'll just ignore that for this check.
+                        if (
+                            helperAttribute.MinArgs != 0
+                            && command.ArgCount - 1 < helperAttribute.MinArgs
+                        )
+                        {
+                            command.ReplyToCommand(
+                                $"[CSS] Expected usage: \"!{command.ArgByIndex(0)} {helperAttribute.Usage}\"."
+                            );
                             return;
                         }
                     }
+
+                    handler?.Invoke(caller, command);
                 }
-
-                // Do not execute if we shouldn't be calling this command.
-                var helperAttribute = methodInfo?.GetCustomAttribute<CommandHelperAttribute>();
-                if (helperAttribute != null) 
-                {
-                    switch (helperAttribute.WhoCanExcecute)
-                    {
-                        case CommandUsage.CLIENT_AND_SERVER: break; // Allow command through.
-                        case CommandUsage.CLIENT_ONLY:
-                            if (caller == null || !caller.IsValid) { command.ReplyToCommand("[CSS] This command can only be executed by clients."); return; } break;
-                        case CommandUsage.SERVER_ONLY:
-                            if (caller != null && caller.IsValid) { command.ReplyToCommand("[CSS] This command can only be executed by the server."); return; } break;
-                        default: throw new ArgumentException("Unrecognised CommandUsage value passed in CommandHelperAttribute.");
-                    }
-
-                    // Technically the command itself counts as the first argument, 
-                    // but we'll just ignore that for this check.
-                    if (helperAttribute.MinArgs != 0 && command.ArgCount - 1 < helperAttribute.MinArgs)
-                    {
-                        command.ReplyToCommand($"[CSS] Expected usage: \"!{command.ArgByIndex(0)} {helperAttribute.Usage}\".");
-                        return;
-                    }
-                }
-
-                handler?.Invoke(caller, command);
-            });
+            );
 
             var methodInfo = handler?.GetMethodInfo();
             var helperAttribute = methodInfo?.GetCustomAttribute<CommandHelperAttribute>();
 
-            var subscriber = new CallbackSubscriber(handler, wrappedHandler, () => { RemoveCommand(name, handler); });
-            NativeAPI.AddCommand(name, description, (helperAttribute?.WhoCanExcecute == CommandUsage.SERVER_ONLY),
-                (int)ConCommandFlags.FCVAR_LINKED_CONCOMMAND, subscriber.GetInputArgument());
+            var subscriber = new CallbackSubscriber(
+                handler,
+                wrappedHandler,
+                () =>
+                {
+                    RemoveCommand(name, handler);
+                }
+            );
+            NativeAPI.AddCommand(
+                name,
+                description,
+                (helperAttribute?.WhoCanExcecute == CommandUsage.SERVER_ONLY),
+                (int)ConCommandFlags.FCVAR_LINKED_CONCOMMAND,
+                subscriber.GetInputArgument()
+            );
             CommandHandlers[handler] = subscriber;
         }
 
-        public void AddCommandListener(string? name, CommandInfo.CommandListenerCallback handler, HookMode mode = HookMode.Pre)
+        public void AddCommandListener(
+            string? name,
+            CommandInfo.CommandListenerCallback handler,
+            HookMode mode = HookMode.Pre
+        )
         {
-            var wrappedHandler = new Func<int, IntPtr, HookResult>((i, ptr) =>
-            {
-                var caller = (i != -1) ? new CCSPlayerController(NativeAPI.GetEntityFromIndex(i + 1)) : null;
+            var wrappedHandler = new Func<int, IntPtr, HookResult>(
+                (i, ptr) =>
+                {
+                    var caller =
+                        (i != -1)
+                            ? new CCSPlayerController(NativeAPI.GetEntityFromIndex(i + 1))
+                            : null;
 
-                var command = new CommandInfo(ptr, caller);
-                return handler.Invoke(caller, command);
-            });
+                    var command = new CommandInfo(ptr, caller);
+                    return handler.Invoke(caller, command);
+                }
+            );
 
-            var subscriber = new CallbackSubscriber(handler, wrappedHandler, () => { RemoveCommandListener(name, handler, mode); });
-            NativeAPI.AddCommandListener(name, subscriber.GetInputArgument(), mode == HookMode.Post);
+            var subscriber = new CallbackSubscriber(
+                handler,
+                wrappedHandler,
+                () =>
+                {
+                    RemoveCommandListener(name, handler, mode);
+                }
+            );
+            NativeAPI.AddCommandListener(
+                name,
+                subscriber.GetInputArgument(),
+                mode == HookMode.Post
+            );
             CommandListeners[handler] = subscriber;
         }
 
@@ -263,13 +346,21 @@ namespace CounterStrikeSharp.API.Core
             }
         }
 
-        public void RemoveCommandListener(string name, CommandInfo.CommandListenerCallback handler, HookMode mode)
+        public void RemoveCommandListener(
+            string name,
+            CommandInfo.CommandListenerCallback handler,
+            HookMode mode
+        )
         {
             if (CommandListeners.ContainsKey(handler))
             {
                 var subscriber = CommandListeners[handler];
 
-                NativeAPI.RemoveCommandListener(name, subscriber.GetInputArgument(), mode == HookMode.Post);
+                NativeAPI.RemoveCommandListener(
+                    name,
+                    subscriber.GetInputArgument(),
+                    mode == HookMode.Post
+                );
 
                 FunctionReference.Remove(subscriber.GetReferenceIdentifier());
                 CommandListeners.Remove(handler);
@@ -303,37 +394,85 @@ namespace CounterStrikeSharp.API.Core
         }*/
 
         // Adds global listener, e.g. OnTick, OnClientConnect
-        public void RegisterListener<T>(T handler) where T : Delegate
+        public void RegisterListener<T>(T handler)
+            where T : Delegate
         {
             var listenerName = typeof(T).GetCustomAttribute<ListenerNameAttribute>()?.Name;
             if (string.IsNullOrEmpty(listenerName))
             {
-                throw new Exception("Listener of type T is invalid and does not have a name attribute");
+                throw new Exception(
+                    "Listener of type T is invalid and does not have a name attribute"
+                );
             }
 
-            var parameterTypes = typeof(T).GetMethod("Invoke").GetParameters().Select(p => p.ParameterType).ToArray();
-            var castedParameterTypes = typeof(T).GetMethod("Invoke").GetParameters()
+            var parameterTypes = typeof(T)
+                .GetMethod("Invoke")
+                .GetParameters()
+                .Select(p => p.ParameterType)
+                .ToArray();
+            var castedParameterTypes = typeof(T)
+                .GetMethod("Invoke")
+                .GetParameters()
                 .Select(p => p.GetCustomAttribute<CastFromAttribute>()?.Type)
                 .ToArray();
 
+
+            var returnType = typeof(T).GetMethod("Invoke").ReturnType;
+
+            Delegate wrappedHandler;
             GlobalContext.Instance.Logger.LogDebug("Registering listener for {ListenerName} with {ParameterCount} parameters",
                 listenerName, parameterTypes.Length);
 
-            var wrappedHandler = new Action<ScriptContext>(context =>
-            {
-                var args = new object[parameterTypes.Length];
-                for (int i = 0; i < parameterTypes.Length; i++)
+            if (returnType != typeof(void)) {
+                wrappedHandler = new Func<ScriptContext, object?>(context =>
                 {
-                    args[i] = context.GetArgument(castedParameterTypes[i] ?? parameterTypes[i], i);
-                    if (castedParameterTypes[i] != null)
-                        args[i] = Activator.CreateInstance(parameterTypes[i], new[] { args[i] });
+                    var args = new object[parameterTypes.Length];
+                    for (int i = 0; i < parameterTypes.Length; i++)
+                    {
+                        args[i] = context.GetArgument(
+                            castedParameterTypes[i] ?? parameterTypes[i],
+                            i
+                        );
+                        if (castedParameterTypes[i] != null)
+                            args[i] = Activator.CreateInstance(
+                                parameterTypes[i],
+                                new[] { args[i] }
+                            );
+                    }
+
+                    return handler.DynamicInvoke(args);
+                });
+            }
+            else
+            {
+                wrappedHandler = new Action<ScriptContext>(context =>
+                {
+                    var args = new object[parameterTypes.Length];
+                    for (int i = 0; i < parameterTypes.Length; i++)
+                    {
+                        args[i] = context.GetArgument(
+                            castedParameterTypes[i] ?? parameterTypes[i],
+                            i
+                        );
+                        if (castedParameterTypes[i] != null)
+                            args[i] = Activator.CreateInstance(
+                                parameterTypes[i],
+                                new[] { args[i] }
+                            );
+                    }
+
+                    handler.DynamicInvoke(args);
+                });
+            }
+
+            var subscriber = new CallbackSubscriber(
+                handler,
+                wrappedHandler,
+                () =>
+                {
+                    RemoveListener(listenerName, handler);
                 }
-
-                handler.DynamicInvoke(args);
-            });
-
-            var subscriber =
-                new CallbackSubscriber(handler, wrappedHandler, () => { RemoveListener(listenerName, handler); });
+            );
 
             NativeAPI.AddListener(listenerName, subscriber.GetInputArgument());
             Listeners[handler] = subscriber;
@@ -341,7 +480,8 @@ namespace CounterStrikeSharp.API.Core
 
         public void RemoveListener(string name, Delegate handler)
         {
-            if (!Listeners.TryGetValue(handler, out var subscriber)) return;
+            if (!Listeners.TryGetValue(handler, out var subscriber))
+                return;
 
             NativeAPI.RemoveListener(name, subscriber.GetInputArgument());
             FunctionReference.Remove(subscriber.GetReferenceIdentifier());
@@ -355,7 +495,6 @@ namespace CounterStrikeSharp.API.Core
             return timer;
         }
 
-
         public void RegisterAllAttributes(object instance)
         {
             this.RegisterAttributeHandlers(instance);
@@ -365,7 +504,9 @@ namespace CounterStrikeSharp.API.Core
         public void InitializeConfig(object instance, Type pluginType)
         {
             Type[] interfaces = pluginType.GetInterfaces();
-            Func<Type, bool> predicate = (i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IPluginConfig<>));
+            Func<Type, bool> predicate = (
+                i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IPluginConfig<>)
+            );
 
             // if the plugin has set a configuration type (implements IPluginConfig<>)
             if (interfaces.Any(predicate))
@@ -376,13 +517,16 @@ namespace CounterStrikeSharp.API.Core
                 // custom config type passed as generic
                 Type genericType = @interface!.GetGenericArguments().First();
 
-                var config = typeof(ConfigManager)
-                    .GetMethod("Load")!
-                    .MakeGenericMethod(genericType)
-                    .Invoke(null, new object[] { Path.GetFileName(ModuleDirectory) }) as IBasePluginConfig;
+                var config =
+                    typeof(ConfigManager)
+                        .GetMethod("Load")!
+                        .MakeGenericMethod(genericType)
+                        .Invoke(null, new object[] { Path.GetFileName(ModuleDirectory) })
+                    as IBasePluginConfig;
 
                 // we KNOW that we can do this "safely"
-                pluginType.GetRuntimeMethod("OnConfigParsed", new Type[] { genericType })
+                pluginType
+                    .GetRuntimeMethod("OnConfigParsed", new Type[] { genericType })
                     .Invoke(instance, new object[] { config });
             }
         }
@@ -393,15 +537,24 @@ namespace CounterStrikeSharp.API.Core
         /// <param name="instance">The instance of the object where the event handlers are defined.</param>
         public void RegisterAttributeHandlers(object instance)
         {
-            var eventHandlers = instance.GetType()
+            var eventHandlers = instance
+                .GetType()
                 .GetMethods()
                 .Where(method => method.GetCustomAttribute<GameEventHandlerAttribute>() != null)
-                .Where(method =>
-                    method.GetParameters().FirstOrDefault()?.ParameterType.IsSubclassOf(typeof(GameEvent)) == true)
+                .Where(
+                    method =>
+                        method
+                            .GetParameters()
+                            .FirstOrDefault()
+                            ?.ParameterType
+                            .IsSubclassOf(typeof(GameEvent)) == true
+                )
                 .ToArray();
 
-            var method = typeof(BasePlugin).GetMethod("RegisterEventHandlerInternal", BindingFlags.NonPublic |
-                BindingFlags.Instance)!;
+            var method = typeof(BasePlugin).GetMethod(
+                "RegisterEventHandlerInternal",
+                BindingFlags.NonPublic | BindingFlags.Instance
+            )!;
 
             foreach (var eventHandler in eventHandlers)
             {
@@ -420,7 +573,8 @@ namespace CounterStrikeSharp.API.Core
 
         public void RegisterConsoleCommandAttributeHandlers(object instance)
         {
-            var eventHandlers = instance.GetType()
+            var eventHandlers = instance
+                .GetType()
                 .GetMethods()
                 .Where(method => method.GetCustomAttributes<ConsoleCommandAttribute>().Any())
                 .ToArray();
@@ -430,8 +584,11 @@ namespace CounterStrikeSharp.API.Core
                 var attributes = eventHandler.GetCustomAttributes<ConsoleCommandAttribute>();
                 foreach (var commandInfo in attributes)
                 {
-                    AddCommand(commandInfo.Command, commandInfo.Description,
-                        eventHandler.CreateDelegate<CommandInfo.CommandCallback>(instance));
+                    AddCommand(
+                        commandInfo.Command,
+                        commandInfo.Description,
+                        eventHandler.CreateDelegate<CommandInfo.CommandCallback>(instance)
+                    );
                 }
             }
         }
@@ -443,8 +600,10 @@ namespace CounterStrikeSharp.API.Core
 
         protected virtual void Dispose(bool disposing)
         {
-            if (_disposed) return;
-            if (!disposing) return;
+            if (_disposed)
+                return;
+            if (!disposing)
+                return;
 
             foreach (var subscriber in Handlers.Values)
             {
@@ -455,15 +614,13 @@ namespace CounterStrikeSharp.API.Core
             {
                 subscriber.Dispose();
             }
-            
+
             foreach (var subscriber in CommandListeners.Values)
             {
                 subscriber.Dispose();
             }
 
-            foreach (var kv in ConvarChangeHandlers)
-            {
-            }
+            foreach (var kv in ConvarChangeHandlers) { }
 
             foreach (var subscriber in Listeners.Values)
             {

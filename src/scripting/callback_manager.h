@@ -58,6 +58,7 @@ class CallbackManager : public GlobalClass
     void ReleaseCallback(ScriptCallback* pCallback);
     bool TryAddFunction(const char* szName, CallbackT fnCallable);
     bool TryRemoveFunction(const char* szName, CallbackT fnCallable);
+    void TryEmitListeners(const char* szName, void* data);
     void PrintCallbackDebug();
 
   private:

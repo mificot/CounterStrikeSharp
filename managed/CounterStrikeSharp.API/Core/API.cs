@@ -30,6 +30,17 @@ namespace CounterStrikeSharp.API.Core
 			}
 		}
 
+		public static void EmitListeners(string name, IntPtr data) {
+			lock (ScriptContext.GlobalScriptContext.Lock) {
+			ScriptContext.GlobalScriptContext.Reset();
+			ScriptContext.GlobalScriptContext.Push(name);
+			ScriptContext.GlobalScriptContext.Push(data);
+			ScriptContext.GlobalScriptContext.SetIdentifier(0x7C3952C2);
+			ScriptContext.GlobalScriptContext.Invoke();
+			ScriptContext.GlobalScriptContext.CheckErrors();
+			}
+		}
+
         public static void AddCommand(string name, string description, bool serveronly, int flags, InputArgument callback){
 			lock (ScriptContext.GlobalScriptContext.Lock) {
 			ScriptContext.GlobalScriptContext.Reset();
