@@ -36,6 +36,9 @@ namespace CounterStrikeSharp.API.Core
         [ListenerName("OnEntityParentChanged")]
         public delegate void OnEntityParentChanged(CEntityInstance entity, CEntityInstance newParent);
 
+        [ListenerName("OnEntityCheckTransmit")]
+        public delegate IntPtr? OnEntityCheckTransmit(int slot);
+
         /// <summary>
         /// Called on every server tick (64 per second).
         /// This handler should avoid containing expensive operations.

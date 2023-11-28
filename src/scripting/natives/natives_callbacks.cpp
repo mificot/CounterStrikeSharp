@@ -34,8 +34,16 @@ static bool RemoveListener(ScriptContext &script_context) {
     return globals::callbackManager.TryRemoveFunction(name, callback);
 }
 
+static void EmitListeners(ScriptContext &script_context) {
+    auto name = script_context.GetArgument<const char *>(0);
+    auto* data = script_context.GetArgument<void *>(1);
+
+    globals::callbackManager.TryEmitListeners(name, data);
+}
+
 REGISTER_NATIVES(callbacks, {
     ScriptEngine::RegisterNativeHandler("ADD_LISTENER", AddListener);
     ScriptEngine::RegisterNativeHandler("REMOVE_LISTENER", RemoveListener);
+    ScriptEngine::RegisterNativeHandler("EMIT_LISTENERS", EmitListeners);
 })
 }  // namespace counterstrikesharp
